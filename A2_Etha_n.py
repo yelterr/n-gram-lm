@@ -14,11 +14,13 @@ class MyNgramLM(object):
             raise Exception('Size of n-grams must be at least 2!')
 
         # keeps track of how many times ngram has appeared in the text before
-        self.ngram_counter = defaultdict(int)
+        self.trigram_counter = defaultdict(int)
+        self.bigram_counter = defaultdict(int)
 
         # Dictionary that keeps list of candidate words given context
         # When generating a text, we only pick from those candidate words
-        self.context = {}
+        self.tri_context = {}
+        self.bi_context = {}
 
         self.vocabulary = set()
         self.vocabulary_size = 0
@@ -98,54 +100,72 @@ class MyNgramLM(object):
         [Input] padding_texts (list of list of string)  e.g., [["<s>", "I","am","Bob","." , "</s>"] , ["<s>", "I","like","to","play", "baseball", "." "</s>"], ..
         [output] ngrams (list of tuples) e.g., [("<s>", "I"), ("I", "am"), .....] for bi-gram
         """
-        ngrams = []
+        trigrams = []
+        bigrams = []
         for words in padding_texts:
             words = self.vocab_lookup(words)
             #########################################################################################
             ### Your code starts here ###############################################################
 
+            # For the tri-grams
             sentence = words # Makes more sense in my brain
+            for i, word in enumerate(sentence):
+                if i == 0 or i == 1:
+                    continue
+                else:
+                    trigrams.append((sentence[i-2], sentence[i-1], word))
+
+            # For the BI-grams
             for i, word in enumerate(sentence):
                 if i == 0:
                     continue
                 else:
-                    ngrams.append((sentence[i-1], word))
+                    bigrams.append((sentence[i-1], word))
 
             ### Your code ends here #################################################################
             #########################################################################################
-        if not ngrams:
+        if not trigrams:
             print("Warning!!! You need to implement this function! This function accounts for 20 points!")
-        return ngrams
+        return (trigrams, bigrams)
 
-    def fit(self, ngrams):
+    def fit(self, trigrams, bigrams):
         """
         Train N-gram Language Models.
         [Input] ngrams (list of tuples) e.g., [("<s>", "I"), ("I", "am"), .....] for bi-gram
         """
         self.ngram_counter = defaultdict(int)
-        self.context = {}
-        for ngram in ngrams:
-            prev_words, target_word = ngram
-            #########################################################################################
-            ### Your code starts here ###############################################################
-            # Tips: self.ngram_counter is used for keeping track of how many times ngram has appeared in the text before.
-            # e.g., {('admire', 'you'): 1, ('you', 'much'): 3}
-            # Tips: self.context is a Dictionary that keeps list of candidate words given context.
-            # e.g., {'revenue': ['service'], 'ein': ['or'], 'federal': ['tax', 'laws']}
-            
-            if ngram not in self.ngram_counter.keys():
-                self.ngram_counter[ngram] = 1
-            else:
-                self.ngram_counter[ngram] += 1
-                
-            if prev_words not in self.context.keys():
-                self.context[prev_words] = [target_word]
-            else:
-                self.context[prev_words].append(target_word)
+        self.tri_context = {}
+        self.bi_context = {}
+        
+        # Building the trigrams data
+        for trigram in trigrams:
+            prev_prev_word, prev_word, target_word = trigram
 
-            ### Your code ends here #################################################################
-            #########################################################################################
-        if not self.context:
+            if trigram not in self.trigram_counter.keys():
+                self.trigram_counter[trigram] = 1
+            else:
+                self.trigram_counter[trigram] += 1
+                
+            if (prev_prev_word, prev_word) not in self.tri_context.keys():
+                self.tri_context[(prev_prev_word, prev_word)] = [target_word]
+            else:
+                self.tri_context[(prev_prev_word, prev_word)].append(target_word)
+
+        # Building the BIgrams data
+        for bigram in bigrams:
+            prev_word, target_word = bigram
+
+            if bigram not in self.bigram_counter.keys():
+                self.bigram_counter[bigram] = 1
+            else:
+                self.bigram_counter[bigram] += 1
+                
+            if prev_word not in self.bi_context.keys():
+                self.bi_context[prev_word] = [target_word]
+            else:
+                self.bi_context[prev_word].append(target_word)
+        
+        if not self.tri_context:
             print("Warning!!! You need to implement this function! This function accounts for 20 points!")
         else:
             print("Finish Language Model Training.")
@@ -159,21 +179,24 @@ class MyNgramLM(object):
         """
         try:
             result = None
-            #########################################################################################
-            ### Your code starts here ###############################################################
-            # Tips: calculate count(Wn-1, Wn)
-            # Tips: calculate count(Wn-1)
-            # Tips: calculate Padd-k(Wn|Wn-1) and remember add-k smoothing here.
+            # Now I need to pass in either 2 context words in a tuple to this function or just one in a string
+            prev_prev_word, prev_word = context
 
-            ngram_count = self.ngram_counter[(context, token)]
-            context_count = len(self.context[context])
+            tri_gram_count = self.trigram_counter[(prev_prev_word, prev_word, token)]
+            tri_context_count = len(self.tri_context[context])
 
-            result = (ngram_count + 0.75) / (context_count + 0.75 * self.vocabulary_size)
+            result = (tri_gram_count + 0.75) / (tri_context_count + 0.75 * self.vocabulary_size)
+        except:
+            # If the context provided is not in the tri-gram context, or not a tuple
+            try:            
+                bi_gram_count = self.bigram_counter[(context, token)]
+                bi_context_count = len(self.bi_context[context])
+    
+                result = (bi_gram_count + 0.75) / (bi_context_count + 0.75 * self.vocabulary_size)
             
-            ### Your code ends here #################################################################
-            #########################################################################################
-        except KeyError:
-            result = 0.0
+            except:
+                # Not in the tri-gram or bi-gram data
+                result = 0.0
 
         if result is None:
             print("Warning!!! You need to implement this function! This function accounts for 20 points!")
@@ -186,30 +209,35 @@ class MyNgramLM(object):
         [Output]
         """
         selected_token = None
-        #########################################################################################
-        ### Your code starts here ###############################################################
-        # Tips: Get all candidate words for the given context via self.context
-        # Tips: Get the probabilities for each ngram (context+word) via self.calc_prob
-        # you may store all probabilities in np.array
-        # Tips: Return a random candidate word based on the probability distribution
-        # you may use np.random.choice
 
-        candidates = self.context[context]
-        probabilities = np.zeros((len(candidates),))
+        # Dropout when choosing next word
+        try:
+            candidates = self.tri_context[context]
+            probabilities = np.zeros((len(candidates),))
+    
+            for i, candidate in enumerate(candidates):
+                probabilities[i] = self.calc_prob(context, candidate)
 
-        for i, candidate in enumerate(candidates):
-            probabilities[i] = self.calc_prob(context, candidate)
+            new_probabilities = probabilities/sum(probabilities)
+            selected_token = np.random.choice(candidates, p=new_probabilities)
+        except:
+            # Since tri-grams didn't work, now time to try with bi-grams
+            try:
+                context = context[-1]
+                candidates = self.bi_context[context]
+                probabilities = np.zeros((len(candidates),))
         
-        # The below did not work for me since my probabilities do not sum up to 1.
-        # I'm not sure whether this is an error on my part or whether add-k probabilities
-        # normally don't add up to 1. Anyways, I've just made it so that they do.
-        # selected_token = np.random.choice(candidates, p=probabilities)
-
-        new_probabilities = probabilities/sum(probabilities)
-        selected_token = np.random.choice(candidates, p=new_probabilities)
+                for i, candidate in enumerate(candidates):
+                    probabilities[i] = self.calc_prob(context, candidate)
+    
+                new_probabilities = probabilities/sum(probabilities)
+                selected_token = np.random.choice(candidates, p=new_probabilities)
+            
+            # bi-gram doesn't exist either, so time to return a random word.
+            except:
+                # I typecast self.vocabulary to a list so that I can use random choice on it
+                selected_token = np.random.choice(list(self.vocabulary))
         
-        ### Your code ends here #################################################################
-        #########################################################################################
         if selected_token is None:
             print("Warning!!! You need to implement this function! This function accounts for 10 points!")
         return selected_token
@@ -221,10 +249,6 @@ class MyNgramLM(object):
                 start_context (string): start words
         [Output] generated text (string)
         """
-        if not self.context:
-            print("Warning!!! You need to implement this function! This function accounts for 10 points!")
-            return
-
         n = self.n
 
         start_context = start_context.split()
@@ -232,28 +256,38 @@ class MyNgramLM(object):
         # The following block merely prepares the first context; note that the context is always of size
         # (self.n - 1) so depending on the start_context (representing the start/seed words), we need to
         # pad or cut off the start_context.
+
+        # I made the context_queue a tuple so that it could be input into context
         if len(start_context) == (n - 1):
-            context_queue = start_context.copy()
+            context_queue = tuple(start_context.copy())
         elif len(start_context) < (n - 1):
-            context_queue = ((n - (len(start_context) + 1)) * [self.sos]) + start_context.copy()
+            context_queue = tuple(((n - (len(start_context) + 1)) * [self.sos]) + start_context.copy())
         elif len(start_context) > (n - 1):
-            context_queue = start_context[-(n - 1):].copy()
+            context_queue = tuple(start_context[-(n - 1):].copy())
         result = start_context.copy()
         
         # The main loop for generating words
         for _ in range(token_count):
             # Generate the next token given the current context
-            obj = self.random_token(" ".join(context_queue))
+            obj = self.random_token(context_queue)
             # Add generated word to the result list
             result.append(obj)
             # Remove the first token from the context
-            context_queue.pop(0)
+            context_queue = context_queue[1:]
             if obj == self.eos:
                 # If we generate the EOS token, we can return the sentence (without the EOS token)
                 return ' '.join(result[:-1])
-                #context_queue.append(self.sos) # If I want sentences to keep going further.
+                #context_queue = (context_queue[0], self.sos) # If I want sentences to keep going further.
             else:
                 # Otherwise create the new context and keep generate the next word
-                context_queue.append(obj)
+                context_queue = (context_queue[0], obj)
+                
         # Fallback if we predict more than token_count tokens
+        # Commented out for loop is only needed if we continue on past the end of the predicted sentence.
+        '''
+        # Replace the end-of-sentence symbol with nothing so that the output is better.
+        for i, word in enumerate(result):
+            if word == self.eos:
+                result[i] = ""
+        '''
         return ' '.join(result)
